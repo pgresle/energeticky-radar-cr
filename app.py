@@ -29,42 +29,61 @@ st.set_page_config(
 st.markdown("""
 <style>
 .block-container {
-    padding-top: 1rem;
+    padding-top: 3.5rem;
     padding-bottom: 2rem;
     max-width: 1150px;
 }
+
 .big-title {
     font-size: 2.1rem;
     font-weight: 800;
-    line-height: 1.1;
-    margin-bottom: 0.3rem;
+    line-height: 1.15;
+    margin-top: 0.4rem;
+    margin-bottom: 0.5rem;
 }
+
 .subtitle {
     font-size: 1rem;
     color: #555;
     margin-bottom: 1rem;
 }
+
+div[data-testid="stMetricValue"] {
+    font-size: 2rem;
+    line-height: 1.1;
+}
+
 @media (max-width: 700px) {
-    .big-title {
-        font-size: 1.55rem;
-    }
-    .subtitle {
-        font-size: 0.95rem;
-    }
     .block-container {
+        padding-top: 4.2rem;
         padding-left: 0.8rem;
         padding-right: 0.8rem;
     }
+
+    .big-title {
+        font-size: 1.55rem;
+        line-height: 1.2;
+        margin-top: 0.7rem;
+    }
+
+    .subtitle {
+        font-size: 0.95rem;
+    }
+
     div[data-testid="stMetric"] {
         background-color: #f8f9fb;
         padding: 0.7rem;
         border-radius: 14px;
         border: 1px solid #e5e7eb;
     }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.55rem;
+        line-height: 1.15;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ============================================================
 # KONSTANTY
