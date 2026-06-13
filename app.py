@@ -28,58 +28,261 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* Celá stránka */
+.stApp {
+    background: linear-gradient(180deg, #dff1ff 0%, #eef7ff 35%, #f8fbff 100%);
+}
+
+/* Hlavní kontejner */
 .block-container {
-    padding-top: 3.5rem;
+    padding-top: 2.8rem;
     padding-bottom: 2rem;
-    max-width: 1150px;
+    max-width: 1180px;
 }
 
-.big-title {
-    font-size: 2.1rem;
+/* HERO banner */
+.hero-banner {
+    position: relative;
+    overflow: hidden;
+    border-radius: 28px;
+    padding: 2.2rem 2rem 5.5rem 2rem;
+    margin-bottom: 1.4rem;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05)),
+        linear-gradient(135deg, #4fa7e8 0%, #2f7fd1 45%, #2265b8 100%);
+    box-shadow: 0 14px 36px rgba(38, 87, 146, 0.18);
+    color: white;
+}
+
+/* Mraky */
+.hero-banner::before,
+.hero-banner::after {
+    content: "";
+    position: absolute;
+    background: rgba(255,255,255,0.33);
+    border-radius: 999px;
+    filter: blur(0.2px);
+}
+
+.hero-banner::before {
+    width: 180px;
+    height: 55px;
+    top: 28px;
+    left: 40px;
+    box-shadow:
+        35px -18px 0 8px rgba(255,255,255,0.30),
+        95px -8px 0 0 rgba(255,255,255,0.25),
+        420px 15px 0 18px rgba(255,255,255,0.18),
+        480px -8px 0 5px rgba(255,255,255,0.24);
+}
+
+.hero-banner::after {
+    width: 150px;
+    height: 45px;
+    top: 72px;
+    right: 120px;
+    box-shadow:
+        28px -12px 0 6px rgba(255,255,255,0.28),
+        78px -5px 0 0 rgba(255,255,255,0.20),
+        -340px 0px 0 14px rgba(255,255,255,0.14);
+}
+
+/* Text v banneru */
+.hero-title {
+    position: relative;
+    z-index: 3;
+    font-size: 2.5rem;
     font-weight: 800;
-    line-height: 1.15;
-    margin-top: 0.4rem;
-    margin-bottom: 0.5rem;
+    line-height: 1.08;
+    margin-bottom: 0.45rem;
+    letter-spacing: -0.02em;
 }
 
-.subtitle {
-    font-size: 1rem;
-    color: #555;
-    margin-bottom: 1rem;
+.hero-subtitle {
+    position: relative;
+    z-index: 3;
+    font-size: 1.05rem;
+    line-height: 1.45;
+    max-width: 760px;
+    color: rgba(255,255,255,0.92);
+}
+
+/* Spodní energetická silueta */
+.energy-scene {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 130px;
+    z-index: 2;
+}
+
+.energy-ground {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 44px;
+    background: rgba(13, 54, 104, 0.22);
+}
+
+.turbine {
+    position: absolute;
+    bottom: 44px;
+    width: 4px;
+    background: rgba(255,255,255,0.95);
+    border-radius: 4px;
+}
+.turbine::before,
+.turbine::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 2px;
+    width: 44px;
+    height: 2px;
+    background: rgba(255,255,255,0.95);
+    transform-origin: left center;
+    border-radius: 2px;
+}
+.turbine::before {
+    transform: rotate(20deg);
+}
+.turbine::after {
+    transform: rotate(-40deg);
+}
+.turbine .blade3 {
+    position: absolute;
+    top: 6px;
+    left: 2px;
+    width: 44px;
+    height: 2px;
+    background: rgba(255,255,255,0.95);
+    transform-origin: left center;
+    transform: rotate(105deg);
+    border-radius: 2px;
+}
+
+.t1 { left: 70px; height: 78px; }
+.t2 { left: 155px; height: 98px; }
+.t3 { left: 255px; height: 66px; }
+
+/* Chladicí věže */
+.cooling-tower {
+    position: absolute;
+    bottom: 44px;
+    width: 78px;
+    height: 78px;
+    background: rgba(255,255,255,0.88);
+    clip-path: polygon(20% 100%, 0% 0%, 100% 0%, 80% 100%);
+    opacity: 0.9;
+}
+.ct1 { right: 250px; }
+.ct2 { right: 170px; height: 88px; width: 84px; }
+
+.steam {
+    position: absolute;
+    background: rgba(255,255,255,0.42);
+    border-radius: 999px;
+}
+.s1 { right: 248px; bottom: 118px; width: 55px; height: 22px; }
+.s2 { right: 208px; bottom: 142px; width: 72px; height: 28px; }
+.s3 { right: 165px; bottom: 126px; width: 58px; height: 22px; }
+
+/* Solární panely */
+.solar {
+    position: absolute;
+    bottom: 44px;
+    width: 120px;
+    height: 42px;
+    background: rgba(22, 49, 93, 0.88);
+    border: 2px solid rgba(255,255,255,0.6);
+    transform: skew(-20deg);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
+}
+.solar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(to right, rgba(255,255,255,0.20) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.20) 1px, transparent 1px);
+    background-size: 22px 18px;
+}
+.solar1 { right: 40px; }
+.solar2 { right: 110px; bottom: 52px; width: 98px; height: 34px; }
+
+/* Bílé "karty" */
+div[data-testid="stMetric"],
+div[data-testid="stDataFrame"],
+.stTabs,
+div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stPlotlyChart"]) {
+    border-radius: 18px;
+}
+
+/* Metriky */
+div[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(70, 115, 170, 0.10);
+    padding: 0.9rem 1rem;
+    box-shadow: 0 8px 20px rgba(44, 89, 150, 0.07);
+}
+
+div[data-testid="stMetricLabel"] {
+    color: #38506b;
+    font-weight: 600;
 }
 
 div[data-testid="stMetricValue"] {
     font-size: 2rem;
     line-height: 1.1;
+    color: #18324f;
 }
 
+/* Tabs jemnější */
+button[data-baseweb="tab"] {
+    font-size: 1rem;
+}
+
+/* Mobil */
 @media (max-width: 700px) {
     .block-container {
-        padding-top: 4.2rem;
+        padding-top: 3.5rem;
         padding-left: 0.8rem;
         padding-right: 0.8rem;
     }
 
-    .big-title {
-        font-size: 1.55rem;
-        line-height: 1.2;
-        margin-top: 0.7rem;
+    .hero-banner {
+        padding: 1.4rem 1rem 5.2rem 1rem;
+        border-radius: 22px;
     }
 
-    .subtitle {
+    .hero-title {
+        font-size: 1.7rem;
+        line-height: 1.15;
+    }
+
+    .hero-subtitle {
         font-size: 0.95rem;
+        max-width: 100%;
     }
 
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fb;
-        padding: 0.7rem;
-        border-radius: 14px;
-        border: 1px solid #e5e7eb;
+    .energy-scene {
+        height: 110px;
     }
+
+    .t1 { left: 28px; height: 52px; }
+    .t2 { left: 82px; height: 68px; }
+    .t3 { left: 142px; height: 46px; }
+
+    .ct1 { right: 120px; width: 58px; height: 58px; }
+    .ct2 { right: 62px; width: 62px; height: 68px; }
+
+    .solar1 { right: 10px; width: 86px; height: 30px; }
+    .solar2 { display: none; }
 
     div[data-testid="stMetricValue"] {
         font-size: 1.55rem;
-        line-height: 1.15;
     }
 }
 </style>
