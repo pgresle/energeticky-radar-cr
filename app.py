@@ -23,30 +23,86 @@ st.set_page_config(
 
 
 # ============================================================
-# DESIGN / CSS
+# ZÁKLADNÍ DESIGN STRÁNKY
 # ============================================================
 
 st.markdown("""
 <style>
-/* Celá stránka */
 .stApp {
     background: linear-gradient(180deg, #dff1ff 0%, #eef7ff 35%, #f8fbff 100%);
 }
 
-/* Hlavní kontejner */
 .block-container {
-    padding-top: 3.2rem;
+    padding-top: 2.4rem;
     padding-bottom: 2rem;
     max-width: 1180px;
 }
 
-/* Hero banner */
+div[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(70, 115, 170, 0.10);
+    padding: 0.9rem 1rem;
+    border-radius: 18px;
+    box-shadow: 0 8px 20px rgba(44, 89, 150, 0.07);
+}
+
+div[data-testid="stMetricLabel"] {
+    color: #38506b;
+    font-weight: 600;
+}
+
+div[data-testid="stMetricValue"] {
+    font-size: 1.9rem;
+    line-height: 1.1;
+    color: #18324f;
+}
+
+button[data-baseweb="tab"] {
+    font-size: 1rem;
+}
+
+div[data-testid="stDataFrame"],
+div[data-testid="stPlotlyChart"] {
+    background: rgba(255,255,255,0.88);
+    border-radius: 18px;
+}
+
+@media (max-width: 700px) {
+    .block-container {
+        padding-top: 3.2rem;
+        padding-left: 0.8rem;
+        padding-right: 0.8rem;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.45rem;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# HERO BANNER
+# ============================================================
+
+hero_html = """
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
 .hero-banner {
     position: relative;
     overflow: hidden;
     border-radius: 28px;
-    padding: 2.2rem 2rem 5.5rem 2rem;
-    margin-bottom: 1.4rem;
+    min-height: 220px;
+    padding: 34px 32px;
+    box-sizing: border-box;
     background:
         linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05)),
         linear-gradient(135deg, #4fa7e8 0%, #2f7fd1 45%, #2265b8 100%);
@@ -54,14 +110,12 @@ st.markdown("""
     color: white;
 }
 
-/* Mraky */
 .hero-banner::before,
 .hero-banner::after {
     content: "";
     position: absolute;
-    background: rgba(255,255,255,0.33);
+    background: rgba(255,255,255,0.30);
     border-radius: 999px;
-    filter: blur(0.2px);
 }
 
 .hero-banner::before {
@@ -87,33 +141,31 @@ st.markdown("""
         -340px 0px 0 14px rgba(255,255,255,0.14);
 }
 
-/* Text v banneru */
 .hero-title {
     position: relative;
     z-index: 3;
-    font-size: 2.5rem;
+    font-size: 46px;
     font-weight: 800;
     line-height: 1.08;
-    margin-bottom: 0.45rem;
-    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+    letter-spacing: -0.03em;
 }
 
 .hero-subtitle {
     position: relative;
     z-index: 3;
-    font-size: 1.05rem;
+    font-size: 20px;
     line-height: 1.45;
-    max-width: 760px;
-    color: rgba(255,255,255,0.92);
+    max-width: 850px;
+    color: rgba(255,255,255,0.94);
 }
 
-/* Spodní energetická silueta */
 .energy-scene {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 130px;
+    height: 125px;
     z-index: 2;
 }
 
@@ -122,14 +174,13 @@ st.markdown("""
     bottom: 0;
     left: 0;
     right: 0;
-    height: 44px;
+    height: 42px;
     background: rgba(13, 54, 104, 0.22);
 }
 
-/* Větrné elektrárny */
 .turbine {
     position: absolute;
-    bottom: 44px;
+    bottom: 42px;
     width: 4px;
     background: rgba(255,255,255,0.95);
     border-radius: 4px;
@@ -156,7 +207,7 @@ st.markdown("""
     transform: rotate(-40deg);
 }
 
-.turbine .blade3 {
+.blade3 {
     position: absolute;
     top: 6px;
     left: 2px;
@@ -172,10 +223,9 @@ st.markdown("""
 .t2 { left: 155px; height: 98px; }
 .t3 { left: 255px; height: 66px; }
 
-/* Chladicí věže */
 .cooling-tower {
     position: absolute;
-    bottom: 44px;
+    bottom: 42px;
     width: 78px;
     height: 78px;
     background: rgba(255,255,255,0.88);
@@ -192,14 +242,13 @@ st.markdown("""
     border-radius: 999px;
 }
 
-.s1 { right: 248px; bottom: 118px; width: 55px; height: 22px; }
-.s2 { right: 208px; bottom: 142px; width: 72px; height: 28px; }
-.s3 { right: 165px; bottom: 126px; width: 58px; height: 22px; }
+.s1 { right: 248px; bottom: 116px; width: 55px; height: 22px; }
+.s2 { right: 208px; bottom: 140px; width: 72px; height: 28px; }
+.s3 { right: 165px; bottom: 124px; width: 58px; height: 22px; }
 
-/* Solární panely */
 .solar {
     position: absolute;
-    bottom: 44px;
+    bottom: 42px;
     width: 120px;
     height: 42px;
     background: rgba(22, 49, 93, 0.88);
@@ -219,75 +268,26 @@ st.markdown("""
 }
 
 .solar1 { right: 40px; }
-.solar2 { right: 110px; bottom: 52px; width: 98px; height: 34px; }
+.solar2 { right: 110px; bottom: 50px; width: 98px; height: 34px; }
 
-/* Ovládací panel */
-.control-card {
-    background: rgba(255,255,255,0.88);
-    border: 1px solid rgba(70, 115, 170, 0.12);
-    border-radius: 22px;
-    padding: 1.1rem 1.2rem 1.2rem 1.2rem;
-    margin-bottom: 1.2rem;
-    box-shadow: 0 8px 24px rgba(44, 89, 150, 0.08);
-}
-
-/* Metriky */
-div[data-testid="stMetric"] {
-    background: rgba(255,255,255,0.92);
-    border: 1px solid rgba(70, 115, 170, 0.10);
-    padding: 0.9rem 1rem;
-    border-radius: 18px;
-    box-shadow: 0 8px 20px rgba(44, 89, 150, 0.07);
-}
-
-div[data-testid="stMetricLabel"] {
-    color: #38506b;
-    font-weight: 600;
-}
-
-div[data-testid="stMetricValue"] {
-    font-size: 1.9rem;
-    line-height: 1.1;
-    color: #18324f;
-}
-
-/* Tabs */
-button[data-baseweb="tab"] {
-    font-size: 1rem;
-}
-
-/* Grafy a tabulky */
-div[data-testid="stDataFrame"],
-div[data-testid="stPlotlyChart"] {
-    background: rgba(255,255,255,0.88);
-    border-radius: 18px;
-}
-
-/* Mobil */
 @media (max-width: 700px) {
-    .block-container {
-        padding-top: 3.8rem;
-        padding-left: 0.8rem;
-        padding-right: 0.8rem;
-    }
-
     .hero-banner {
-        padding: 1.4rem 1rem 5.2rem 1rem;
+        min-height: 230px;
+        padding: 24px 18px;
         border-radius: 22px;
     }
 
     .hero-title {
-        font-size: 1.7rem;
-        line-height: 1.15;
+        font-size: 30px;
+        line-height: 1.12;
     }
 
     .hero-subtitle {
-        font-size: 0.95rem;
-        max-width: 100%;
+        font-size: 16px;
     }
 
     .energy-scene {
-        height: 110px;
+        height: 105px;
     }
 
     .t1 { left: 28px; height: 52px; }
@@ -299,13 +299,39 @@ div[data-testid="stPlotlyChart"] {
 
     .solar1 { right: 10px; width: 86px; height: 30px; }
     .solar2 { display: none; }
-
-    div[data-testid="stMetricValue"] {
-        font-size: 1.45rem;
-    }
 }
 </style>
-""", unsafe_allow_html=True)
+</head>
+<body>
+<div class="hero-banner">
+    <div class="hero-title">⚡ Energetický radar ČR</div>
+    <div class="hero-subtitle">
+        Počasí pro obnovitelné zdroje, ceny denního trhu OTE
+        a výroba elektřiny pro Česko v jednom přehledu.
+    </div>
+
+    <div class="energy-scene">
+        <div class="turbine t1"><div class="blade3"></div></div>
+        <div class="turbine t2"><div class="blade3"></div></div>
+        <div class="turbine t3"><div class="blade3"></div></div>
+
+        <div class="cooling-tower ct1"></div>
+        <div class="cooling-tower ct2"></div>
+
+        <div class="steam s1"></div>
+        <div class="steam s2"></div>
+        <div class="steam s3"></div>
+
+        <div class="solar solar1"></div>
+        <div class="solar solar2"></div>
+        <div class="energy-ground"></div>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+components.html(hero_html, height=250, scrolling=False)
 
 
 # ============================================================
@@ -545,42 +571,8 @@ def get_ote_day_ahead_prices() -> tuple[pd.DataFrame, str]:
 
 
 # ============================================================
-# HLAVIČKA
+# OVLÁDÁNÍ
 # ============================================================
-
-st.markdown("""
-<div class="hero-banner">
-    <div class="hero-title">⚡ Energetický radar ČR</div>
-    <div class="hero-subtitle">
-        Počasí pro obnovitelné zdroje, ceny denního trhu OTE
-        a výroba elektřiny pro Česko v jednom přehledu.
-    </div>
-
-    <div class="energy-scene">
-        <div class="turbine t1"><div class="blade3"></div></div>
-        <div class="turbine t2"><div class="blade3"></div></div>
-        <div class="turbine t3"><div class="blade3"></div></div>
-
-        <div class="cooling-tower ct1"></div>
-        <div class="cooling-tower ct2"></div>
-
-        <div class="steam s1"></div>
-        <div class="steam s2"></div>
-        <div class="steam s3"></div>
-
-        <div class="solar solar1"></div>
-        <div class="solar solar2"></div>
-        <div class="energy-ground"></div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ============================================================
-# OVLÁDÁNÍ V HLAVNÍ STRÁNCE
-# ============================================================
-
-st.markdown('<div class="control-card">', unsafe_allow_html=True)
 
 st.subheader("Nastavení dashboardu")
 
@@ -615,8 +607,6 @@ energostat_days = st.slider(
     max_value=30,
     value=7
 )
-
-st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
