@@ -1,8 +1,18 @@
-import streamlit as st
+import re
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+from io import StringIO
+
 import pandas as pd
-import requests
 import plotly.express as px
-from datetime import datetime, timedelta
+import requests
+import streamlit as st
+from bs4 import BeautifulSoup
+
+
+# ============================================================
+# NASTAVENÍ STRÁNKY
+# ============================================================
 
 st.set_page_config(
     page_title="Energetický radar ČR",
@@ -11,52 +21,71 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# -------------------------------
-# Mobilně přívětivé CSS
-# -------------------------------
+
+# ============================================================
+# CSS
+# ============================================================
+
 st.markdown("""
 <style>
 .block-container {
     padding-top: 1rem;
     padding-bottom: 2rem;
-    max-width: 1100px;
+    max-width: 1150px;
 }
-.metric-card {
-    background: #f6f7f9;
-    border-radius: 18px;
-    padding: 16px 18px;
-    margin-bottom: 10px;
-    border: 1px solid #e6e8eb;
-}
+
 .big-title {
     font-size: 2.1rem;
     font-weight: 800;
     line-height: 1.1;
+    margin-bottom: 0.3rem;
 }
+
 .subtitle {
     font-size: 1rem;
     color: #555;
+    margin-bottom: 1rem;
 }
+
 .small-note {
     font-size: 0.85rem;
     color: #666;
 }
+
 @media (max-width: 700px) {
     .big-title {
         font-size: 1.55rem;
     }
+
+    .subtitle {
+        font-size: 0.95rem;
+    }
+
     .block-container {
         padding-left: 0.8rem;
         padding-right: 0.8rem;
+    }
+
+    div[data-testid="stMetric"] {
+        background-color: #f8f9fb;
+        padding: 0.7rem;
+        border-radius: 14px;
+        border: 1px solid #e5e7eb;
     }
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-# -------------------------------
-# Lokality
-# -------------------------------
+# ============================================================
+# KONSTANTY
+# ============================================================
+
+OTE_DAM_URL = "https://www.ote-cr.cz/cs/kratkodobe-trhy/elektrina/denni-trh"
+
+ENTSOE_API_URL = "https://web-api.tp.entsoe.eu/api"
+CZ_DOMAIN = "10YCZ-CEPS-----N"
+
 LOCATIONS = {
     "Praha": {"lat": 50.0755, "lon": 14.4378},
     "Brno": {"lat": 49.1951, "lon": 16.6068},
@@ -69,13 +98,135 @@ LOCATIONS = {
 }
 
 
+PSR_TYPE_MAP = {
+    "B01": "Biomasa",
+    "B02": "Hnědé uhlí / lignit",
+    "B03": "Uhelný plyn",
+    "B04": "Plyn",
+    "B05": "Černé uhlí",
+    "B06": "Ropa",
+    "B07": "Ropné břidlice",
+    "B08": "Rašelina",
+    "B09": "Geotermální energie",
+    "B10": "Přečerpávací vodní elektrárny",
+    "B11": "Průtočné vodní elektrárny",
+    "B12": "Akumulační vodní elektrárny",
+    "B13": "Mořská energie",
+    "B14": "Jádro",
+    "B15": "Ostatní OZE",
+    "B16": "Fotovoltaika",
+    "B17": "Odpad",
+    "B18": "Vítr offshore",
+    "B19": "Vítr onshore",
+    "B20": "Ostatní",
+    "B25": "Akumulace energie",
+}
+
+
+# ============================================================
+# POMOCNÉ FUNKCE
+# ============================================================
+
+def parse_czech_number(value):
+    """
+    Převede české číslo typu '1 234,56' na float.
+    """
+
+    if pd.isna(value):
+        return None
+
+    value = str(value)
+    value = value.replace("\xa0", " ")
+    value = value.replace(" ", "")
+    value = value.replace(",", ".")
+
+    value = re.sub(r"[^0-9.\-]", "", value)
+
+    if value in ["", "-", ".", "-."]:
+        return None
+
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def flatten_columns(columns):
+    """
+    Zploští MultiIndex názvy sloupců z HTML tabulek.
+    """
+
+    if isinstance(columns, pd.MultiIndex):
+        result = []
+        for col in columns:
+            parts = [
+                str(x).strip()
+                for x in col
+                if str(x).strip()
+                and not str(x).startswith("Unnamed")
+            ]
+            result.append(" ".join(parts))
+        return result
+
+    return [str(c).strip() for c in columns]
+
+
+def strip_xml_namespace(tag):
+    """
+    Odstraní XML namespace z názvu tagu.
+    """
+
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def find_child_text(element, wanted_tag):
+    """
+    Najde první podřízený XML tag podle lokálního názvu.
+    """
+
+    for child in element.iter():
+        if strip_xml_namespace(child.tag) == wanted_tag:
+            return child.text
+    return None
+
+
+def parse_resolution(resolution):
+    """
+    ENTSO-E resolution: PT15M, PT30M, PT60M, PT1H.
+    """
+
+    if resolution in ["PT15M"]:
+        return timedelta(minutes=15)
+
+    if resolution in ["PT30M"]:
+        return timedelta(minutes=30)
+
+    if resolution in ["PT60M", "PT1H"]:
+        return timedelta(hours=1)
+
+    return timedelta(hours=1)
+
+
+def to_entsoe_time(dt):
+    """
+    ENTSO-E API používá čas ve formátu YYYYMMDDHHMM v UTC.
+    """
+
+    return dt.strftime("%Y%m%d%H%M")
+
+
+# ============================================================
+# OPEN-METEO: POČASÍ
+# ============================================================
+
 @st.cache_data(ttl=1800)
 def get_open_meteo(lat: float, lon: float) -> pd.DataFrame:
     """
-    Free Open-Meteo forecast API.
-    No API key needed for basic non-commercial use.
+    Reálná předpověď počasí z Open-Meteo.
     """
+
     url = "https://api.open-meteo.com/v1/forecast"
+
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -91,222 +242,653 @@ def get_open_meteo(lat: float, lon: float) -> pd.DataFrame:
         "forecast_days": 3,
         "timezone": "Europe/Prague"
     }
-    r = requests.get(url, params=params, timeout=20)
-    r.raise_for_status()
-    data = r.json()["hourly"]
+
+    response = requests.get(url, params=params, timeout=20)
+    response.raise_for_status()
+
+    data = response.json()["hourly"]
     df = pd.DataFrame(data)
     df["time"] = pd.to_datetime(df["time"])
+
     return df
 
 
-def make_renewables_comment(now_row: pd.Series) -> str:
-    wind = now_row.get("wind_speed_10m", 0)
-    radiation = now_row.get("shortwave_radiation", 0)
-    cloud = now_row.get("cloud_cover", 100)
+def make_renewables_comment(row: pd.Series) -> str:
+    """
+    Jednoduchý slovní komentář k počasí pro OZE.
+    """
+
+    wind = row.get("wind_speed_10m", 0)
+    radiation = row.get("shortwave_radiation", 0)
+    cloud = row.get("cloud_cover", 100)
 
     solar_score = min(100, max(0, radiation / 8))
     wind_score = min(100, max(0, wind * 10))
 
     if solar_score > 65 and wind_score > 45:
-        return "Dnes to vypadá dobře pro fotovoltaiku i vítr."
+        return "Aktuálně jsou dobré podmínky pro fotovoltaiku i vítr."
+
     if solar_score > 65:
-        return "Dnes jsou dobré podmínky hlavně pro fotovoltaiku."
+        return "Aktuálně jsou dobré podmínky hlavně pro fotovoltaiku."
+
     if wind_score > 55:
-        return "Dnes jsou lepší podmínky hlavně pro vítr."
+        return "Aktuálně jsou lepší podmínky hlavně pro vítr."
+
     if cloud > 80 and wind < 4:
-        return "Dnes počasí obnovitelným zdrojům moc nepomáhá."
-    return "Podmínky pro OZE jsou dnes spíše střední."
+        return "Aktuálně počasí obnovitelným zdrojům moc nepomáhá."
+
+    return "Aktuální podmínky pro obnovitelné zdroje jsou spíše střední."
 
 
-def synthetic_price_data(weather_df: pd.DataFrame) -> pd.DataFrame:
+# ============================================================
+# OTE: REÁLNÉ CENY DENNÍHO TRHU
+# ============================================================
+
+@st.cache_data(ttl=900)
+def get_ote_day_ahead_prices() -> tuple[pd.DataFrame, str]:
     """
-    Dočasná demonstrační cena, než se napojí OTE/ENTSO-E.
-    Není to reálná tržní cena.
+    Načte veřejnou tabulku denního trhu z OTE.
+    Vrací 15minutové ceny, množství a datum uvedené na stránce.
     """
-    df = weather_df[["time", "shortwave_radiation", "wind_speed_10m"]].copy()
-    hour = df["time"].dt.hour
 
-    # základní denní profil: levněji v noci a kolem poledne, dražší ráno/večer
-    base = 95
-    evening_peak = ((hour >= 17) & (hour <= 21)).astype(int) * 35
-    morning_peak = ((hour >= 7) & (hour <= 9)).astype(int) * 20
-    solar_discount = (df["shortwave_radiation"] / 1000) * 35
-    wind_discount = df["wind_speed_10m"] * 2.0
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    df["price_eur_mwh_demo"] = base + evening_peak + morning_peak - solar_discount - wind_discount
-    df["price_eur_mwh_demo"] = df["price_eur_mwh_demo"].round(1)
+    response = requests.get(OTE_DAM_URL, headers=headers, timeout=30)
+    response.raise_for_status()
+
+    html = response.text
+    soup = BeautifulSoup(html, "html.parser")
+
+    heading_text = ""
+    for tag in soup.find_all(["h1", "h2", "h3"]):
+        text = tag.get_text(" ", strip=True)
+        if "Výsledky denního trhu" in text:
+            heading_text = text
+            break
+
+    tables = pd.read_html(StringIO(html), decimal=",", thousands=" ")
+
+    price_table = None
+
+    for table in tables:
+        table = table.copy()
+        table.columns = flatten_columns(table.columns)
+        columns_joined = " | ".join(table.columns)
+
+        if "Časový interval" in columns_joined and "15min cena" in columns_joined:
+            price_table = table
+            break
+
+    if price_table is None:
+        raise ValueError(
+            "Na stránce OTE se nepodařilo najít tabulku s 15minutovými cenami."
+        )
+
+    interval_col = None
+    price_col = None
+    volume_col = None
+    export_col = None
+    import_col = None
+    balance_col = None
+
+    for col in price_table.columns:
+        col_clean = str(col)
+
+        if "Časový interval" in col_clean:
+            interval_col = col
+
+        if "15min cena" in col_clean and "EUR" in col_clean:
+            price_col = col
+
+        if "Množství" in col_clean and "MWh" in col_clean and volume_col is None:
+            volume_col = col
+
+        if "Export" in col_clean:
+            export_col = col
+
+        if "Import" in col_clean:
+            import_col = col
+
+        if "Saldo" in col_clean:
+            balance_col = col
+
+    if interval_col is None or price_col is None:
+        raise ValueError(
+            "Tabulka OTE byla nalezena, ale nejde rozpoznat interval nebo cenu."
+        )
+
+    df = pd.DataFrame()
+
+    df["interval"] = price_table[interval_col].astype(str)
+    df["price_eur_mwh"] = price_table[price_col].apply(parse_czech_number)
+
+    if volume_col is not None:
+        df["volume_mwh"] = price_table[volume_col].apply(parse_czech_number)
+
+    if export_col is not None:
+        df["export_mwh"] = price_table[export_col].apply(parse_czech_number)
+
+    if import_col is not None:
+        df["import_mwh"] = price_table[import_col].apply(parse_czech_number)
+
+    if balance_col is not None:
+        df["balance_mwh"] = price_table[balance_col].apply(parse_czech_number)
+
+    df = df.dropna(subset=["price_eur_mwh"])
+    df = df[df["interval"].str.contains("-", regex=False)]
+
+    # Datum z nadpisu, např. "Výsledky denního trhu ČR - 14.06.2026"
+    date_match = re.search(r"(\d{2}\.\d{2}\.\d{4})", heading_text)
+
+    if date_match:
+        delivery_date = pd.to_datetime(date_match.group(1), format="%d.%m.%Y")
+        delivery_date_text = date_match.group(1)
+    else:
+        delivery_date = pd.Timestamp.now(tz="Europe/Prague").tz_localize(None).normalize()
+        delivery_date_text = delivery_date.strftime("%d.%m.%Y")
+
+    start_times = df["interval"].str.split("-", expand=True)[0]
+    df["time"] = pd.to_datetime(
+        delivery_date.strftime("%Y-%m-%d") + " " + start_times,
+        format="%Y-%m-%d %H:%M",
+        errors="coerce"
+    )
+
+    df = df.dropna(subset=["time"])
+    df = df.sort_values("time")
+
+    return df, delivery_date_text
+
+
+# ============================================================
+# ENTSO-E: REÁLNÁ VÝROBA ELEKTŘINY
+# ============================================================
+
+@st.cache_data(ttl=1800)
+def get_entsoe_generation_by_type(token: str, hours_back: int = 48) -> pd.DataFrame:
+    """
+    Načte skutečnou výrobu elektřiny po zdrojích z ENTSO-E.
+    Vyžaduje ENTSO-E security token.
+    """
+
+    if not token:
+        raise ValueError("Chybí ENTSO-E token.")
+
+    end_utc = datetime.now(timezone.utc)
+    start_utc = end_utc - timedelta(hours=hours_back)
+
+    params = {
+        "securityToken": token,
+        "documentType": "A75",
+        "processType": "A16",
+        "in_Domain": CZ_DOMAIN,
+        "periodStart": to_entsoe_time(start_utc),
+        "periodEnd": to_entsoe_time(end_utc),
+    }
+
+    response = requests.get(ENTSOE_API_URL, params=params, timeout=45)
+    response.raise_for_status()
+
+    xml_text = response.text
+
+    if "No matching data found" in xml_text:
+        raise ValueError("ENTSO-E nevrátilo žádná data pro zvolený interval.")
+
+    root = ET.fromstring(xml_text)
+
+    rows = []
+
+    for ts in root.iter():
+        if strip_xml_namespace(ts.tag) != "TimeSeries":
+            continue
+
+        psr_code = None
+
+        for child in ts.iter():
+            if strip_xml_namespace(child.tag) == "psrType":
+                psr_code = child.text
+                break
+
+        source_name = PSR_TYPE_MAP.get(psr_code, psr_code or "Neznámý zdroj")
+
+        for period in ts.iter():
+            if strip_xml_namespace(period.tag) != "Period":
+                continue
+
+            start_text = None
+            resolution_text = None
+
+            for child in period.iter():
+                local_tag = strip_xml_namespace(child.tag)
+
+                if local_tag == "start":
+                    start_text = child.text
+
+                if local_tag == "resolution":
+                    resolution_text = child.text
+
+            if not start_text:
+                continue
+
+            period_start_utc = pd.to_datetime(start_text, utc=True)
+            step = parse_resolution(resolution_text)
+
+            for point in period.iter():
+                if strip_xml_namespace(point.tag) != "Point":
+                    continue
+
+                position = None
+                quantity = None
+
+                for child in point:
+                    local_tag = strip_xml_namespace(child.tag)
+
+                    if local_tag == "position":
+                        position = int(child.text)
+
+                    if local_tag == "quantity":
+                        quantity = float(child.text)
+
+                if position is None or quantity is None:
+                    continue
+
+                timestamp_utc = period_start_utc + (position - 1) * step
+                timestamp_prague = timestamp_utc.tz_convert("Europe/Prague").tz_localize(None)
+
+                rows.append({
+                    "time": timestamp_prague,
+                    "source": source_name,
+                    "mw": quantity
+                })
+
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        raise ValueError("ENTSO-E data byla stažena, ale nepodařilo se je rozparsovat.")
+
+    df = df.sort_values("time")
+
     return df
 
 
-# -------------------------------
-# Header
-# -------------------------------
-st.markdown('<div class="big-title">⚡ Energetický radar ČR</div>', unsafe_allow_html=True)
+# ============================================================
+# HLAVIČKA
+# ============================================================
+
 st.markdown(
-    '<div class="subtitle">Mobilní dashboard: počasí pro OZE, orientační cenový profil a příprava na data OTE / ENTSO‑E / ČEPS.</div>',
+    '<div class="big-title">⚡ Energetický radar ČR</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <div class="subtitle">
+    Reálný mobilní dashboard pro Česko: počasí pro obnovitelné zdroje,
+    ceny denního trhu OTE a výroba elektřiny po zdrojích z ENTSO-E.
+    </div>
+    """,
     unsafe_allow_html=True
 )
 
 st.divider()
 
-# -------------------------------
-# Ovládání
-# -------------------------------
-col_a, col_b = st.columns([2, 1])
-with col_a:
-    location_name = st.selectbox("Vyber lokalitu", list(LOCATIONS.keys()), index=2)
-with col_b:
-    view_days = st.slider("Počet dní", min_value=1, max_value=3, value=2)
 
-loc = LOCATIONS[location_name]
+# ============================================================
+# SIDEBAR / NASTAVENÍ
+# ============================================================
+
+with st.sidebar:
+    st.header("Nastavení")
+
+    location_name = st.selectbox(
+        "Lokalita pro počasí",
+        list(LOCATIONS.keys()),
+        index=2
+    )
+
+    weather_days = st.slider(
+        "Počasí – počet dní",
+        min_value=1,
+        max_value=3,
+        value=2
+    )
+
+    generation_hours = st.slider(
+        "Výroba ENTSO-E – kolik hodin zpět",
+        min_value=12,
+        max_value=72,
+        value=48,
+        step=12
+    )
+
+    st.markdown("---")
+
+    st.markdown("### ENTSO-E token")
+
+    token_from_secrets = ""
+    try:
+        token_from_secrets = st.secrets.get("ENTSOE_TOKEN", "")
+    except Exception:
+        token_from_secrets = ""
+
+    token_from_input = st.text_input(
+        "ENTSO-E security token",
+        value="",
+        type="password",
+        help="Na Streamlit Cloud je lepší uložit token do Secrets jako ENTSOE_TOKEN."
+    )
+
+    entsoe_token = token_from_secrets or token_from_input
+
+
+# ============================================================
+# NAČTENÍ DAT
+# ============================================================
+
+location = LOCATIONS[location_name]
+
+weather_error = None
+price_error = None
+generation_error = None
+
+weather = pd.DataFrame()
+prices = pd.DataFrame()
+generation = pd.DataFrame()
+ote_delivery_date = ""
 
 try:
-    weather = get_open_meteo(loc["lat"], loc["lon"])
+    weather = get_open_meteo(location["lat"], location["lon"])
 except Exception as e:
-    st.error(f"Nepodařilo se načíst data z Open‑Meteo: {e}")
-    st.stop()
+    weather_error = str(e)
 
-end_time = weather["time"].min() + timedelta(days=view_days)
-weather_view = weather[weather["time"] < end_time].copy()
+try:
+    prices, ote_delivery_date = get_ote_day_ahead_prices()
+except Exception as e:
+    price_error = str(e)
 
-now = pd.Timestamp.now(tz="Europe/Prague").tz_localize(None)
-weather_view["abs_diff_now"] = (weather_view["time"] - now).abs()
-now_row = weather_view.loc[weather_view["abs_diff_now"].idxmin()]
+try:
+    if entsoe_token:
+        generation = get_entsoe_generation_by_type(
+            token=entsoe_token,
+            hours_back=generation_hours
+        )
+    else:
+        generation_error = (
+            "Pro reálnou výrobu po zdrojích je potřeba ENTSO-E token. "
+            "Aplikace nezobrazuje náhradní demonstrační data."
+        )
+except Exception as e:
+    generation_error = str(e)
 
-price_demo = synthetic_price_data(weather_view)
 
-# -------------------------------
-# Top metriky
-# -------------------------------
-st.subheader("Dnes v OZE počasí")
+# ============================================================
+# TOP KARTY
+# ============================================================
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Vítr", f"{now_row['wind_speed_10m']:.1f} km/h")
-m2.metric("Nárazy", f"{now_row['wind_gusts_10m']:.1f} km/h")
-m3.metric("Sluneční záření", f"{now_row['shortwave_radiation']:.0f} W/m²")
-m4.metric("Oblačnost", f"{now_row['cloud_cover']:.0f} %")
+st.subheader("Aktuální přehled")
 
-st.info(make_renewables_comment(now_row))
+metric_cols = st.columns(4)
 
-# -------------------------------
-# Tabs
-# -------------------------------
+# Počasí
+if not weather.empty:
+    end_time = weather["time"].min() + timedelta(days=weather_days)
+    weather_view = weather[weather["time"] < end_time].copy()
+
+    now = pd.Timestamp.now(tz="Europe/Prague").tz_localize(None)
+    weather_view["abs_diff_now"] = (weather_view["time"] - now).abs()
+    now_row = weather_view.loc[weather_view["abs_diff_now"].idxmin()]
+
+    metric_cols[0].metric(
+        "Vítr",
+        f"{now_row['wind_speed_10m']:.1f} km/h"
+    )
+
+    metric_cols[1].metric(
+        "Slunce",
+        f"{now_row['shortwave_radiation']:.0f} W/m²"
+    )
+else:
+    weather_view = pd.DataFrame()
+    metric_cols[0].metric("Vítr", "N/A")
+    metric_cols[1].metric("Slunce", "N/A")
+
+# Cena OTE
+if not prices.empty:
+    avg_price = prices["price_eur_mwh"].mean()
+    min_price = prices["price_eur_mwh"].min()
+    max_price = prices["price_eur_mwh"].max()
+
+    metric_cols[2].metric(
+        f"OTE průměr {ote_delivery_date}",
+        f"{avg_price:.2f} EUR/MWh"
+    )
+
+    metric_cols[3].metric(
+        "Min / max cena",
+        f"{min_price:.2f} / {max_price:.2f}"
+    )
+else:
+    metric_cols[2].metric("OTE cena", "N/A")
+    metric_cols[3].metric("Min / max cena", "N/A")
+
+if weather_error:
+    st.error(f"Počasí se nepodařilo načíst: {weather_error}")
+
+if price_error:
+    st.error(f"Ceny OTE se nepodařilo načíst: {price_error}")
+
+
+# ============================================================
+# KOMENTÁŘ K OZE
+# ============================================================
+
+if not weather.empty:
+    st.info(make_renewables_comment(now_row))
+
+
+# ============================================================
+# TABS
+# ============================================================
+
 tab1, tab2, tab3, tab4 = st.tabs([
     "🌤️ Vítr a slunce",
-    "💶 Cena elektřiny",
-    "⚙️ Výroba elektřiny",
-    "ℹ️ Zdroje a další kroky"
+    "💶 Cena elektřiny OTE",
+    "⚙️ Výroba elektřiny ENTSO-E",
+    "ℹ️ Zdroje"
 ])
+
+
+# ============================================================
+# TAB 1: POČASÍ
+# ============================================================
 
 with tab1:
     st.subheader(f"Počasí pro OZE: {location_name}")
 
-    fig_sun = px.line(
-        weather_view,
-        x="time",
-        y=["shortwave_radiation", "direct_radiation", "diffuse_radiation"],
-        labels={
-            "time": "čas",
-            "value": "W/m²",
-            "variable": "typ záření"
-        },
-        title="Sluneční záření"
-    )
-    st.plotly_chart(fig_sun, use_container_width=True)
+    if weather.empty:
+        st.error("Počasí není dostupné.")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
 
-    fig_wind = px.line(
-        weather_view,
-        x="time",
-        y=["wind_speed_10m", "wind_gusts_10m"],
-        labels={
-            "time": "čas",
-            "value": "km/h",
-            "variable": "ukazatel"
-        },
-        title="Vítr"
-    )
-    st.plotly_chart(fig_wind, use_container_width=True)
+        c1.metric(
+            "Teplota",
+            f"{now_row['temperature_2m']:.1f} °C"
+        )
 
-    fig_cloud = px.area(
-        weather_view,
-        x="time",
-        y="cloud_cover",
-        labels={"time": "čas", "cloud_cover": "oblačnost (%)"},
-        title="Oblačnost"
-    )
-    st.plotly_chart(fig_cloud, use_container_width=True)
+        c2.metric(
+            "Vítr",
+            f"{now_row['wind_speed_10m']:.1f} km/h"
+        )
 
+        c3.metric(
+            "Nárazy",
+            f"{now_row['wind_gusts_10m']:.1f} km/h"
+        )
+
+        c4.metric(
+            "Oblačnost",
+            f"{now_row['cloud_cover']:.0f} %"
+        )
+
+        fig_sun = px.line(
+            weather_view,
+            x="time",
+            y=[
+                "shortwave_radiation",
+                "direct_radiation",
+                "diffuse_radiation"
+            ],
+            labels={
+                "time": "čas",
+                "value": "W/m²",
+                "variable": "typ záření"
+            },
+            title="Sluneční záření"
+        )
+
+        fig_sun.update_layout(
+            legend_title_text="Typ záření",
+            margin=dict(l=10, r=10, t=60, b=10)
+        )
+
+        st.plotly_chart(fig_sun, use_container_width=True)
+
+        fig_wind = px.line(
+            weather_view,
+            x="time",
+            y=[
+                "wind_speed_10m",
+                "wind_gusts_10m"
+            ],
+            labels={
+                "time": "čas",
+                "value": "km/h",
+                "variable": "ukazatel"
+            },
+            title="Vítr a nárazy větru"
+        )
+
+        fig_wind.update_layout(
+            legend_title_text="Ukazatel",
+            margin=dict(l=10, r=10, t=60, b=10)
+        )
+
+        st.plotly_chart(fig_wind, use_container_width=True)
+
+        fig_cloud = px.area(
+            weather_view,
+            x="time",
+            y="cloud_cover",
+            labels={
+                "time": "čas",
+                "cloud_cover": "oblačnost (%)"
+            },
+            title="Oblačnost"
+        )
+
+        fig_cloud.update_layout(
+            margin=dict(l=10, r=10, t=60, b=10)
+        )
+
+        st.plotly_chart(fig_cloud, use_container_width=True)
+
+
+# ============================================================
+# TAB 2: OTE CENY
+# ============================================================
 
 with tab2:
-    st.subheader("Cena elektřiny")
+    st.subheader("Cena elektřiny – denní trh OTE")
 
-    st.warning(
-        "Toto je zatím demonstrační cenový profil podle počasí, ne reálná cena OTE. "
-        "Slouží k odladění vzhledu dashboardu. Reálná data OTE/ENTSO‑E se doplní v další verzi."
-    )
+    if prices.empty:
+        st.error("Ceny OTE nejsou dostupné.")
+    else:
+        st.caption(f"Datum dodávky podle stránky OTE: {ote_delivery_date}")
 
-    fig_price = px.line(
-        price_demo,
-        x="time",
-        y="price_eur_mwh_demo",
-        labels={"time": "čas", "price_eur_mwh_demo": "EUR/MWh"},
-        title="Demonstrační profil ceny elektřiny"
-    )
-    st.plotly_chart(fig_price, use_container_width=True)
+        fig_price = px.line(
+            prices,
+            x="time",
+            y="price_eur_mwh",
+            labels={
+                "time": "čas",
+                "price_eur_mwh": "EUR/MWh"
+            },
+            title="15minutové ceny denního trhu OTE"
+        )
 
-    cheapest = price_demo.loc[price_demo["price_eur_mwh_demo"].idxmin()]
-    most_expensive = price_demo.loc[price_demo["price_eur_mwh_demo"].idxmax()]
+        fig_price.update_layout(
+            margin=dict(l=10, r=10, t=60, b=10)
+        )
 
-    c1, c2 = st.columns(2)
-    c1.metric("Nejlevnější interval", cheapest["time"].strftime("%d.%m. %H:%M"), f"{cheapest['price_eur_mwh_demo']:.1f} EUR/MWh")
-    c2.metric("Nejdražší interval", most_expensive["time"].strftime("%d.%m. %H:%M"), f"{most_expensive['price_eur_mwh_demo']:.1f} EUR/MWh")
+        st.plotly_chart(fig_price, use_container_width=True)
 
+        cheapest = prices.loc[prices["price_eur_mwh"].idxmin()]
+        most_expensive = prices.loc[prices["price_eur_mwh"].idxmax()]
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "Průměr",
+            f"{prices['price_eur_mwh'].mean():.2f} EUR/MWh"
+        )
+
+        c2.metric(
+            "Nejlevnější interval",
+            cheapest["time"].strftime("%H:%M"),
+            f"{cheapest['price_eur_mwh']:.2f} EUR/MWh"
+        )
+
+        c3.metric(
+            "Nejdražší interval",
+            most_expensive["time"].strftime("%H:%M"),
+            f"{most_expensive['price_eur_mwh']:.2f} EUR/MWh"
+        )
+
+        negative_count = int((prices["price_eur_mwh"] < 0).sum())
+
+        if negative_count > 0:
+            st.warning(
+                f"Počet intervalů se zápornou cenou: {negative_count}"
+            )
+        else:
+            st.success("V načtených datech nejsou záporné ceny.")
+
+        shown_cols = [
+            col for col in [
+                "time",
+                "interval",
+                "price_eur_mwh",
+                "volume_mwh",
+                "export_mwh",
+                "import_mwh",
+                "balance_mwh"
+            ]
+            if col in prices.columns
+        ]
+
+        st.dataframe(
+            prices[shown_cols],
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+# ============================================================
+# TAB 3: ENTSO-E VÝROBA
+# ============================================================
 
 with tab3:
-    st.subheader("Výroba elektřiny po zdrojích")
+    st.subheader("Výroba elektřiny po zdrojích – ENTSO-E")
 
-    st.info(
-        "Sem patří napojení na ENTSO‑E / ČEPS: výroba z jádra, uhlí, plynu, vody, větru, FVE, biomasy, "
-        "spotřeba a přeshraniční toky. Kostra aplikace je na to připravená."
-    )
+    if generation_error:
+        st.error(generation_error)
 
-    demo_generation = pd.DataFrame({
-        "Zdroj": ["Jádro", "Uhlí", "Plyn", "Voda", "Fotovoltaika", "Vítr", "Biomasa / ostatní"],
-        "Výroba_GW_demo": [3.7, 2.4, 0.8, 0.5, 1.2, 0.2, 0.4]
-    })
+        st.markdown("""
+Pro spuštění této části potřebuješ ENTSO-E token.
 
-    fig_gen = px.bar(
-        demo_generation,
-        x="Zdroj",
-        y="Výroba_GW_demo",
-        title="Demonstrační mix výroby elektřiny",
-        labels={"Výroba_GW_demo": "GW"}
-    )
-    st.plotly_chart(fig_gen, use_container_width=True)
+Na Streamlit Cloud ho ulož do:
 
-    st.dataframe(demo_generation, use_container_width=True, hide_index=True)
-
-
-with tab4:
-    st.subheader("Zdroje dat a plán napojení")
-
-    st.markdown("""
-**Aktuálně funkční v této kostře**
-- Open‑Meteo: vítr, nárazy, oblačnost, teplota, sluneční záření.
-- Mobilní layout pro Streamlit.
-- Demonstrační cenový profil.
-
-**K doplnění v další verzi**
-- OTE: reálné ceny denního trhu.
-- ENTSO‑E: výroba po zdrojích, zatížení, přeshraniční toky.
-- ČEPS: doplňkové údaje o síti.
-- Mapový pohled: kraje / vybrané lokality.
-- Export grafů do PNG/CSV.
-
-**Poznámka**
-Demonstrační data o ceně a výrobě nejsou reálná tržní ani provozní data.
-Mají jen ukázat, jak bude aplikace vypadat.
-""")
-
-st.divider()
-st.caption("Pracovní verze dashboardu: Energetický radar ČR | Python + Streamlit + Plotly + Open‑Meteo")
+```toml
+ENTSOE_TOKEN = "tvuj_token"
