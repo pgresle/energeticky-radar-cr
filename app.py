@@ -340,28 +340,28 @@ st.divider()
 # SIDEBAR
 # ============================================================
 
-with st.sidebar:
-    st.header("Nastavení")
+st.subheader("Nastavení dashboardu")
 
+control_col1, control_col2, control_col3 = st.columns([2, 1, 2])
+
+with control_col1:
     location_name = st.selectbox(
         "Lokalita pro počasí",
         list(LOCATIONS.keys()),
         index=2
     )
 
+with control_col2:
     weather_days = st.slider(
-        "Počasí – počet dní",
+        "Počasí – dní",
         min_value=1,
         max_value=3,
         value=2
     )
 
-    st.markdown("---")
-
-    st.subheader("Energostat")
-
+with control_col3:
     energostat_chart = st.selectbox(
-        "Typ grafu",
+        "Energostat graf",
         {
             "generation-online": "Výroba elektřiny",
             "generation-share": "Podíl zdrojů na výrobě",
@@ -376,13 +376,12 @@ with st.sidebar:
         }[x]
     )
 
-    energostat_days = st.slider(
-        "Energostat – počet dní zpět",
-        min_value=1,
-        max_value=30,
-        value=7
-    )
-
+energostat_days = st.slider(
+    "Energostat – počet dní zpět",
+    min_value=1,
+    max_value=30,
+    value=7
+)
 
 # ============================================================
 # NAČTENÍ DAT
