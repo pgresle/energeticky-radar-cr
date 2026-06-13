@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from io import StringIO
 
 import pandas as pd
 import plotly.express as px
@@ -7,7 +8,6 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from bs4 import BeautifulSoup
-from io import StringIO
 
 
 # ============================================================
@@ -23,7 +23,7 @@ st.set_page_config(
 
 
 # ============================================================
-# CSS
+# DESIGN / CSS
 # ============================================================
 
 st.markdown("""
@@ -35,12 +35,12 @@ st.markdown("""
 
 /* Hlavní kontejner */
 .block-container {
-    padding-top: 2.8rem;
+    padding-top: 3.2rem;
     padding-bottom: 2rem;
     max-width: 1180px;
 }
 
-/* HERO banner */
+/* Hero banner */
 .hero-banner {
     position: relative;
     overflow: hidden;
@@ -126,6 +126,7 @@ st.markdown("""
     background: rgba(13, 54, 104, 0.22);
 }
 
+/* Větrné elektrárny */
 .turbine {
     position: absolute;
     bottom: 44px;
@@ -133,6 +134,7 @@ st.markdown("""
     background: rgba(255,255,255,0.95);
     border-radius: 4px;
 }
+
 .turbine::before,
 .turbine::after {
     content: "";
@@ -145,12 +147,15 @@ st.markdown("""
     transform-origin: left center;
     border-radius: 2px;
 }
+
 .turbine::before {
     transform: rotate(20deg);
 }
+
 .turbine::after {
     transform: rotate(-40deg);
 }
+
 .turbine .blade3 {
     position: absolute;
     top: 6px;
@@ -177,6 +182,7 @@ st.markdown("""
     clip-path: polygon(20% 100%, 0% 0%, 100% 0%, 80% 100%);
     opacity: 0.9;
 }
+
 .ct1 { right: 250px; }
 .ct2 { right: 170px; height: 88px; width: 84px; }
 
@@ -185,6 +191,7 @@ st.markdown("""
     background: rgba(255,255,255,0.42);
     border-radius: 999px;
 }
+
 .s1 { right: 248px; bottom: 118px; width: 55px; height: 22px; }
 .s2 { right: 208px; bottom: 142px; width: 72px; height: 28px; }
 .s3 { right: 165px; bottom: 126px; width: 58px; height: 22px; }
@@ -200,6 +207,7 @@ st.markdown("""
     transform: skew(-20deg);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
 }
+
 .solar::before {
     content: "";
     position: absolute;
@@ -209,22 +217,26 @@ st.markdown("""
         linear-gradient(to bottom, rgba(255,255,255,0.20) 1px, transparent 1px);
     background-size: 22px 18px;
 }
+
 .solar1 { right: 40px; }
 .solar2 { right: 110px; bottom: 52px; width: 98px; height: 34px; }
 
-/* Bílé "karty" */
-div[data-testid="stMetric"],
-div[data-testid="stDataFrame"],
-.stTabs,
-div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stPlotlyChart"]) {
-    border-radius: 18px;
+/* Ovládací panel */
+.control-card {
+    background: rgba(255,255,255,0.88);
+    border: 1px solid rgba(70, 115, 170, 0.12);
+    border-radius: 22px;
+    padding: 1.1rem 1.2rem 1.2rem 1.2rem;
+    margin-bottom: 1.2rem;
+    box-shadow: 0 8px 24px rgba(44, 89, 150, 0.08);
 }
 
 /* Metriky */
 div[data-testid="stMetric"] {
-    background: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.92);
     border: 1px solid rgba(70, 115, 170, 0.10);
     padding: 0.9rem 1rem;
+    border-radius: 18px;
     box-shadow: 0 8px 20px rgba(44, 89, 150, 0.07);
 }
 
@@ -234,20 +246,27 @@ div[data-testid="stMetricLabel"] {
 }
 
 div[data-testid="stMetricValue"] {
-    font-size: 2rem;
+    font-size: 1.9rem;
     line-height: 1.1;
     color: #18324f;
 }
 
-/* Tabs jemnější */
+/* Tabs */
 button[data-baseweb="tab"] {
     font-size: 1rem;
+}
+
+/* Grafy a tabulky */
+div[data-testid="stDataFrame"],
+div[data-testid="stPlotlyChart"] {
+    background: rgba(255,255,255,0.88);
+    border-radius: 18px;
 }
 
 /* Mobil */
 @media (max-width: 700px) {
     .block-container {
-        padding-top: 3.5rem;
+        padding-top: 3.8rem;
         padding-left: 0.8rem;
         padding-right: 0.8rem;
     }
@@ -282,11 +301,12 @@ button[data-baseweb="tab"] {
     .solar2 { display: none; }
 
     div[data-testid="stMetricValue"] {
-        font-size: 1.55rem;
+        font-size: 1.45rem;
     }
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ============================================================
 # KONSTANTY
@@ -303,6 +323,13 @@ LOCATIONS = {
     "Jihlava / Vysočina": {"lat": 49.3961, "lon": 15.5912},
     "Krušné hory – Klínovec": {"lat": 50.3964, "lon": 12.9674},
     "Jeseníky – Praděd": {"lat": 50.0833, "lon": 17.2333},
+}
+
+ENERGOSTAT_LABELS = {
+    "generation-online": "Výroba elektřiny",
+    "generation-share": "Podíl zdrojů na výrobě",
+    "load": "Zatížení soustavy",
+    "day-prices": "Spotové ceny",
 }
 
 
@@ -408,7 +435,7 @@ def make_renewables_comment(row: pd.Series) -> str:
 
 
 # ============================================================
-# OTE: REÁLNÉ CENY DENNÍHO TRHU
+# OTE: CENY DENNÍHO TRHU
 # ============================================================
 
 @st.cache_data(ttl=900)
@@ -521,27 +548,39 @@ def get_ote_day_ahead_prices() -> tuple[pd.DataFrame, str]:
 # HLAVIČKA
 # ============================================================
 
-st.markdown(
-    '<div class="big-title">⚡ Energetický radar ČR</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    """
-    <div class="subtitle">
-    Mobilní dashboard pro Česko: počasí pro obnovitelné zdroje,
-    ceny denního trhu OTE a výroba elektřiny přes Energostat.
+st.markdown("""
+<div class="hero-banner">
+    <div class="hero-title">⚡ Energetický radar ČR</div>
+    <div class="hero-subtitle">
+        Počasí pro obnovitelné zdroje, ceny denního trhu OTE
+        a výroba elektřiny pro Česko v jednom přehledu.
     </div>
-    """,
-    unsafe_allow_html=True
-)
 
-st.divider()
+    <div class="energy-scene">
+        <div class="turbine t1"><div class="blade3"></div></div>
+        <div class="turbine t2"><div class="blade3"></div></div>
+        <div class="turbine t3"><div class="blade3"></div></div>
+
+        <div class="cooling-tower ct1"></div>
+        <div class="cooling-tower ct2"></div>
+
+        <div class="steam s1"></div>
+        <div class="steam s2"></div>
+        <div class="steam s3"></div>
+
+        <div class="solar solar1"></div>
+        <div class="solar solar2"></div>
+        <div class="energy-ground"></div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ============================================================
-# SIDEBAR
+# OVLÁDÁNÍ V HLAVNÍ STRÁNCE
 # ============================================================
+
+st.markdown('<div class="control-card">', unsafe_allow_html=True)
 
 st.subheader("Nastavení dashboardu")
 
@@ -565,18 +604,9 @@ with control_col2:
 with control_col3:
     energostat_chart = st.selectbox(
         "Energostat graf",
-        {
-            "generation-online": "Výroba elektřiny",
-            "generation-share": "Podíl zdrojů na výrobě",
-            "load": "Zatížení soustavy",
-            "day-prices": "Spotové ceny"
-        },
-        format_func=lambda x: {
-            "generation-online": "Výroba elektřiny",
-            "generation-share": "Podíl zdrojů na výrobě",
-            "load": "Zatížení soustavy",
-            "day-prices": "Spotové ceny"
-        }[x]
+        list(ENERGOSTAT_LABELS.keys()),
+        index=0,
+        format_func=lambda x: ENERGOSTAT_LABELS[x]
     )
 
 energostat_days = st.slider(
@@ -585,6 +615,9 @@ energostat_days = st.slider(
     max_value=30,
     value=7
 )
+
+st.markdown('</div>', unsafe_allow_html=True)
+
 
 # ============================================================
 # NAČTENÍ DAT
@@ -611,7 +644,7 @@ except Exception as e:
 
 
 # ============================================================
-# TOP KARTY
+# TOP METRIKY
 # ============================================================
 
 st.subheader("Aktuální přehled")
@@ -663,7 +696,7 @@ if not weather.empty:
 
 
 # ============================================================
-# TABS
+# ZÁLOŽKY
 # ============================================================
 
 tab1, tab2, tab3 = st.tabs([
@@ -674,7 +707,7 @@ tab1, tab2, tab3 = st.tabs([
 
 
 # ============================================================
-# TAB 1
+# TAB 1: VÍTR A SLUNCE
 # ============================================================
 
 with tab1:
@@ -728,7 +761,7 @@ with tab1:
 
 
 # ============================================================
-# TAB 2
+# TAB 2: CENA ELEKTŘINY OTE
 # ============================================================
 
 with tab2:
@@ -796,7 +829,7 @@ with tab2:
 
 
 # ============================================================
-# TAB 3
+# TAB 3: ENERGOSTAT
 # ============================================================
 
 with tab3:
@@ -813,8 +846,7 @@ with tab3:
 
     st.markdown(
         f"""
-        Data v této části jsou zobrazena přes **Energostat oEnergetice.cz**.
-        Energostat uvádí jako zdroj dat ENTSO-E Transparency Platform a GIE.
+        Zde je vložen veřejný graf z **Energostatu oEnergetice.cz**.
 
         [Otevřít graf na Energostatu]({energostat_url})
         """
@@ -827,10 +859,14 @@ with tab3:
     )
 
     st.caption(
-        "Poznámka: tato meziverze vkládá veřejný graf Energostatu. "
-        "Až bude k dispozici ENTSO-E token, nahradíme tuto část vlastním grafem přímo v aplikaci."
+        "Meziverze bez ENTSO-E tokenu. Až bude token k dispozici, "
+        "tuto část nahradíme vlastním grafem přímo v aplikaci."
     )
 
+
+# ============================================================
+# PATIČKA
+# ============================================================
 
 st.divider()
 st.caption("Energetický radar ČR | data: Open-Meteo + OTE + Energostat")
